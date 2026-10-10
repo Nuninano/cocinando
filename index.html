@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Cocina Caótica</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{background:#141a26;color:#fff;font:500 16px 'Baloo 2',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:6px;user-select:none;-webkit-user-select:none}
+#wrap{position:relative;width:100%;max-width:900px}
+canvas{width:100%;display:block;background:#2c3a4f;border-radius:10px}
+#ui{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(20,26,38,.9);border-radius:10px;overflow:auto}
+#ui.h{display:none}
+.box{max-width:560px;width:94%;text-align:center;padding:10px}
+h1{font-size:2.3rem;color:#f2b134;line-height:1}
+p{margin:.45rem 0}
+.hint{font-size:.85rem;opacity:.7}
+button,input{font:inherit;border:0;border-radius:10px;padding:.5rem 1rem;margin:.2rem}
+button{background:#f2b134;color:#1d2433;font-weight:700;cursor:pointer}
+button.s{background:#34415a;color:#fff}
+button:disabled{opacity:.3;cursor:default}
+input{background:#fff;color:#1d2433;width:10rem;text-align:center}
+#lv{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}
+#lv button{margin:0;padding:.35rem 0}
+#pl span{display:inline-block;margin:2px 7px}
+#tt{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);background:#000b;padding:4px 16px;border-radius:20px;pointer-events:none;opacity:0;transition:opacity .2s;white-space:nowrap}
+#tt.on{opacity:1}
+#pad{display:none;width:100%;max-width:900px;justify-content:space-between;align-items:center;padding:10px 14px}
+@media(hover:none){#pad{display:flex}}
+#pad button{margin:0;padding:0;font-size:22px;background:#34415a;color:#fff;touch-action:none;width:58px;height:58px}
+#pad .dp{display:grid;grid-template-columns:repeat(3,58px);grid-template-rows:repeat(2,58px);gap:4px}
+#pad .ac button{width:96px;height:58px;font-size:16px;margin-left:8px;background:#f2b134;color:#1d2433}
+</style></head><body>
+<div id="wrap"><canvas></canvas><div id="tt"></div>
+<div id="ui"><div class="box">
+<h1>Cocina Caótica</h1>
+<p>Cocina en equipo, de 1 a 4 jugadores. 20 niveles y un jefe final.</p>
+<input id="nm" placeholder="Tu nombre" maxlength="12"><br>
+<button id="bh">Crear sala</button><br>
+<input id="rid" placeholder="ID de sala"><button id="bj" class="s">Unirse</button>
+<p class="hint">WASD o flechas: mover · Espacio: coger/soltar · E: cortar y apagar fuego</p>
+</div></div></div>
+<div id="pad"><div class="dp">
+<button data-k="u" style="grid-area:1/2">▲</button><button data-k="l" style="grid-area:2/1">◀</button>
+<button data-k="d" style="grid-area:2/2">▼</button><button data-k="r" style="grid-area:2/3">▶</button></div>
+<div class="ac"><button data-k="w">Cortar</button><button data-k="a">Coger</button></div></div>
+<script>
+const W=11,H=7,TS=64,TOP=84,SP=4.6;
+const MAPS={
+A:["XTLMBCXPXSX","X.........X","K.........S","K..3.1.2.4X","G.........W","X.........X","XXXXKXXGXXX"],
+B:["XTLMBCXPXSX","X.........X","K..XXXXX..S","K.1.2.3.4.X","G..XXXXX..W","X.........X","XXXXKXXGXXX"],
+C:["XTLMXXBCPSX","X....#....X","K....X....S","K.12...34.X","G....X....W","X....#....X","XXXXKXXGXXX"],
+D:["XTLMBCXPXSX","X.........X","K.X.X.X.X.S","K.1.2.3.4.X","G.X.X.X.X.W","X.........X","XXXXKXXGXXX"],
+E:["XTLMBCXPSWX","X.........X","X.XXX.XXX.X","K.1.2.3.4.S","X.XXX.XXX.X","G.........G","XXKXXXXXKXX"],
+F:["XTLMBCXPXSX","X.........X","K.........W","K.1.3Z4.2.S","G.........X","G.........X","XXXXKXXKXXX"]};
+const SEQ="ABADCBEDACEBDCEDBEC";
+const NEED={T:1,L:1,C:1,M:2,B:0};
+const ICO={T:'🍅',L:'🥬',C:'🧀',M:'🥩',B:'🍞'};
+const RECS=[["Ensalada",["L1","T1"]],["Burger",["B0","M2"]],["Burger completa",["B0","M2","L1","T1"]],["Cheeseburger",["B0","M2","C1"]],["Súper burger",["B0","M2","C1","L1","T1"]]];
+const BASE={T:'#d9503f',L:'#5faa4a',M:'#b5654a',B:'#d9a352',C:'#e5c34b',K:'#f1e2c4',G:'#3b3f4a',P:'#e9eef2',S:'#3f9d6b',W:'#6b7685'};
+const DEC={T:ICO.T,L:ICO.L,M:ICO.M,B:ICO.B,C:ICO.C,K:'🔪',G:'🍳',P:'🍽️',S:'🔔',W:'🗑️'};
+const PC=['#e5483a','#3aa0e5','#4cc26a','#b86be0'];
+const ICE=[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}];
+function cfg(n){const b=n==20,time=b?240:100+Math.min(n,10)*6,iv=b?13:Math.max(14,30-n*.9);
+ const pool=b?[1,2,3,4]:n<2?[0]:n<4?[0,1]:n<7?[1,2]:n<11?[0,1,2,3]:n<15?[1,2,3]:n<19?[1,2,3,4]:[2,3,4];
+ return{n,b,map:b?'F':SEQ[n-1],time,iv,life:b?55:Math.max(45,85-n*1.8),cook:Math.max(5,8-n*.15),burn:Math.max(4,7-n*.15),pool,tg:Math.round(time/iv*.7*28)}}
+
+const $=s=>document.querySelector(s),cv=$('canvas'),ctx=cv.getContext('2d');
+cv.width=W*TS;cv.height=H*TS+TOP;
+let role=null,peer=null,conn=null,conns={},myId=null,myName='Chef',roomId='',P={},G=null,S=null,V={},MP=MAPS.A,curLv=0,lastKey='',un=1,ttT;
+try{un=+localStorage.getItem('ovc-un')||1}catch(e){}
+const esc=s=>String(s).replace(/[<>&"']/g,'').slice(0,12);
+function toast(m){const t=$('#tt');t.textContent=m;t.classList.add('on');clearTimeout(ttT);ttT=setTimeout(()=>t.classList.remove('on'),2200)}
+
+/* ---------- Simulación (solo anfitrión) ---------- */
+function newG(lv){return{ph:'lobby',lv,c:cfg(lv),sc:0,t:0,cd:0,orders:[],nid:0,nextO:0,st:{},ev:[],hp:100,bt:12,win:false,stars:0}}
+function ev(m){G.ev.push(m);toast(m)}
+function spawn(i){const m=MAPS[G.c.map];for(let j=0;j<H;j++){const x=m[j].indexOf(String(i+1));if(x>=0)return[x+.5,j+.5]}return[5.5,3.5]}
+function addP(id,n){const used=Object.values(P).map(p=>p.i);let i=0;while(used.includes(i))i++;if(i>3)return false;
+ const sp=spawn(i);P[id]={id,n,i,x:sp[0],y:sp[1],fx:0,fy:1,h:null,dx:0,dy:0,w:false};return true}
+function startLevel(n){const keep=G.ev;G=newG(n);G.ev=keep;const c=G.c,m=MAPS[c.map];
+ for(let j=0;j<H;j++)for(let i=0;i<W;i++)if(!'.1234#Z'.includes(m[j][i]))G.st[j*W+i]={ch:m[j][i],item:null,prog:0,fire:0,cook:0,wk:0};
+ G.ph='ready';G.cd=3;G.t=c.time;G.nextO=1;MP=m;
+ Object.values(P).forEach(p=>{const s=spawn(p.i);p.x=s[0];p.y=s[1];p.h=null;p.fx=0;p.fy=1})}
+function solid(x,y){const i=Math.floor(x),j=Math.floor(y);if(i<0||j<0||i>=W||j>=H)return true;return !'.1234'.includes(MAPS[G.c.map][j][i])}
+function move(p,mx,my){const nx=p.x+mx,ny=p.y+my,r=.3;
+ if(!(solid(nx-r,ny-r)||solid(nx+r,ny-r)||solid(nx-r,ny+r)||solid(nx+r,ny+r))){p.x=nx;p.y=ny}}
+function target(p){const i=Math.floor(p.x+p.fx*.75),j=Math.floor(p.y+p.fy*.75);return G.st[j*W+i]}
+const ready=q=>typeof q=='string'&&+q[1]==NEED[q[0]];
+function act(p){const s=target(p);if(!s||s.fire)return;const c=s.ch,h=p.h;
+ if('TLMBC'.includes(c)){if(!h)p.h=c+'0';return}
+ if(c=='P'){if(!h)p.h={p:[]};return}
+ if(c=='W'){p.h=null;return}
+ if(c=='S'){if(h&&typeof h=='object'&&h.p.length)serve(p);return}
+ if(h&&!s.item){if(c=='G'&&!(typeof h=='string'&&h[0]=='M'&&h[1]!='3'))return;
+  s.item=h;p.h=null;if(c=='G')s.cook=h[1]=='2'?1:0;s.prog=0}
+ else if(!h&&s.item){p.h=s.item;s.item=null;s.prog=0;s.cook=0}
+ else if(h&&s.item){const a=h,b=s.item;
+  if(typeof a=='object'&&ready(b)){a.p.push(b);s.item=null;s.cook=0}
+  else if(typeof b=='object'&&ready(a)){b.p.push(a);p.h=null}}}
+function serve(p){const key=a=>[...a].sort().join(),pl=p.h;
+ const k=G.orders.findIndex(o=>key(RECS[o.r][1])==key(pl.p));
+ if(k<0){ev(p.n+': nadie pidió ese plato');return}
+ const o=G.orders.splice(k,1)[0],pts=10+10*pl.p.length+Math.round(10*o.t/o.m);
+ G.sc+=pts;p.h=null;ev('+'+pts+' · '+RECS[o.r][0]);
+ if(G.c.b)G.hp=Math.max(0,G.hp-(6+pl.p.length*3))}
+function work(p,dt){const s=target(p);if(!s)return;
+ if(s.fire){s.prog+=dt/2;s.wk=1;if(s.prog>=1){s.fire=0;s.prog=0}return}
+ if(s.ch=='K'&&typeof s.item=='string'&&s.item[1]=='0'&&'TLC'.includes(s.item[0])){s.wk=1;s.prog+=dt/1.4;if(s.prog>=1){s.item=s.item[0]+'1';s.prog=0}}}
+function endLv(win){G.ph='end';G.win=win;const c=G.c;
+ G.stars=c.b?(win?3:0):(G.sc>=c.tg)+(G.sc>=c.tg*1.5)+(G.sc>=c.tg*2);
+ if(win&&G.lv>=un){un=Math.min(20,G.lv+1);try{localStorage.setItem('ovc-un',un)}catch(e){}}}
+function tick(dt){const g=G;if(!g)return;
+ if(g.ph=='ready'){g.cd-=dt;if(g.cd<=0)g.ph='play';return}
+ if(g.ph!='play')return;
+ const c=g.c;g.t-=dt;
+ g.nextO-=dt;if(g.nextO<=0&&g.orders.length<5){const r=c.pool[Math.random()*c.pool.length|0];g.orders.push({id:++g.nid,r,t:c.life,m:c.life});g.nextO=c.iv*(.8+Math.random()*.4)}
+ g.orders.forEach(o=>o.t-=dt);
+ const ex=g.orders.filter(o=>o.t<=0);if(ex.length){g.orders=g.orders.filter(o=>o.t>0);g.sc=Math.max(0,g.sc-10*ex.length);ev('Pedido caducado −'+10*ex.length)}
+ for(const p of Object.values(P)){let dx=p.dx,dy=p.dy;const l=Math.hypot(dx,dy);
+  if(l){dx/=l;dy/=l;p.fx=Math.abs(dx)>=Math.abs(dy)?Math.sign(dx):0;p.fy=p.fx?0:Math.sign(dy);move(p,dx*SP*dt,0);move(p,0,dy*SP*dt)}
+  if(p.w)work(p,dt)}
+ for(const k in g.st){const s=g.st[k];
+  if(!s.wk&&(s.ch=='K'||s.fire))s.prog=0;s.wk=0;
+  if(s.ch=='G'&&s.item&&!s.fire&&s.item[0]=='M'){
+   if(s.item[1]=='0'){s.cook+=dt/c.cook;if(s.cook>=1){s.item='M2';s.cook=1}}
+   else if(s.item[1]=='2'){s.cook+=dt/c.burn;if(s.cook>=2){s.item='M3';s.cook=2}}}}
+ if(c.b){g.bt-=dt;if(g.bt<=0){g.bt=g.hp<50?8:13;
+   const l=Object.values(g.st).filter(s=>'KG'.includes(s.ch)&&!s.fire);
+   if(l.length){const s=l[Math.random()*l.length|0];s.fire=1;s.item=null;s.prog=0;s.cook=0;ev('¡El jefe incendia una estación!')}}
+  if(g.hp<=0)return endLv(true)}
+ if(g.t<=0){g.t=0;endLv(!c.b&&g.sc>=c.tg)}}
+function snap(){const g=G,s=[];
+ for(const k in g.st){const o=g.st[k];if(o.item||o.fire||o.prog||o.cook)s.push([+k,o.item,o.prog,o.fire,o.cook])}
+ return{ph:g.ph,lv:g.lv,sc:g.sc,tg:g.c.tg,t:g.t,cd:g.cd,hp:g.hp,un,win:g.win,stars:g.stars,rid:roomId,
+  o:g.orders.map(o=>[o.r,o.t/o.m]),p:Object.values(P).map(p=>[p.id,p.n,p.x,p.y,p.fx,p.fy,p.h,p.i]),s,ev:g.ev}}
+let lastT=performance.now(),acc=0,lastR=performance.now();
+function hostStep(){if(role!='h'||!G)return;const n=performance.now(),dt=Math.min((n-lastT)/1000,.25);lastT=n;
+ tick(dt);S=snap();acc+=dt;
+ if(acc>.03){acc=0;const m=JSON.stringify(Object.assign({t:'S'},S));
+  for(const id in conns)if(conns[id].open)conns[id].send(m);G.ev=[]}}
+setInterval(()=>{if(document.hidden)hostStep()},25);
+
+/* ---------- Red (PeerJS, anfitrión autoritativo) ---------- */
+function hostGame(){myName=esc($('#nm').value||'Chef');role='h';myId='h';
+ peer=new Peer('ovc-'+Math.random().toString(36).slice(2,7),{config:{iceServers:ICE}});
+ peer.on('open',id=>{roomId=id;G=newG(1);addP('h',myName)});
+ peer.on('connection',c=>{
+  c.on('open',()=>{if(Object.keys(P).length>=4){c.send({t:'full'});setTimeout(()=>c.close(),300);return}conns[c.peer]=c});
+  c.on('data',d=>{if(typeof d=='string')d=JSON.parse(d);
+   if(d.t=='join'){if(conns[c.peer]&&addP(c.peer,esc(d.n||'Chef')))ev(esc(d.n||'Chef')+' se unió')}
+   const p=P[c.peer];if(!p)return;
+   if(d.t=='in'){p.dx=d.dx|0;p.dy=d.dy|0;p.w=!!d.w}
+   if(d.t=='act'&&G.ph=='play')act(p)});
+  c.on('close',()=>{const p=P[c.peer];if(p)ev(p.n+' se fue');delete P[c.peer];delete conns[c.peer]})});
+ peer.on('disconnected',()=>peer.reconnect());
+ peer.on('error',e=>{if(e.type=='unavailable-id'){peer.destroy();hostGame()}else toast('Error de red: '+e.type)})}
+function joinGame(){const id=$('#rid').value.trim().toLowerCase();if(!id)return toast('Escribe el ID de sala');
+ myName=esc($('#nm').value||'Chef');peer=new Peer(undefined,{config:{iceServers:ICE}});
+ peer.on('open',()=>{conn=peer.connect(id,{reliable:true});
+  conn.on('open',()=>{role='p';myId=peer.id;conn.send({t:'join',n:myName})});
+  conn.on('data',d=>{if(typeof d=='string')d=JSON.parse(d);
+   if(d.t=='S'){d.ev.forEach(toast);S=d;if(d.lv!=curLv){curLv=d.lv;MP=MAPS[cfg(d.lv).map]}}
+   if(d.t=='full')toast('La sala está llena')});
+  conn.on('close',()=>{toast('Conexión perdida');setTimeout(()=>location.reload(),1500)})});
+ peer.on('error',e=>toast('No se pudo conectar: '+e.type+'. ¿ID correcto?'))}
+
+/* ---------- Entrada ---------- */
+const K={},KM={ArrowLeft:'l',a:'l',ArrowRight:'r',d:'r',ArrowUp:'u',w:'u',ArrowDown:'d',s:'d',' ':'a',j:'a',e:'w',k:'w',Shift:'w'};
+function sendIn(){const m={dx:(K.r?1:0)-(K.l?1:0),dy:(K.d?1:0)-(K.u?1:0),w:!!K.w};
+ if(role=='h'&&P.h)Object.assign(P.h,m);else if(role=='p'&&conn.open)conn.send({t:'in',...m})}
+function doAct(){if(role=='h'){if(G.ph=='play'&&P.h)act(P.h)}else if(role=='p'&&conn.open)conn.send({t:'act'})}
+function key(e,v){if(e.target.tagName=='INPUT')return;const k=KM[e.key.length==1?e.key.toLowerCase():e.key];if(!k)return;
+ e.preventDefault();if(v&&k=='a'&&!K.a&&!e.repeat)doAct();K[k]=v;sendIn()}
+addEventListener('keydown',e=>key(e,1));addEventListener('keyup',e=>key(e,0));
+document.querySelectorAll('#pad button').forEach(b=>{const k=b.dataset.k;
+ b.addEventListener('pointerdown',e=>{e.preventDefault();if(k=='a')doAct();K[k]=1;sendIn()});
+ ['pointerup','pointerleave','pointercancel'].forEach(t=>b.addEventListener(t,()=>{K[k]=0;sendIn()}))});
+setInterval(()=>{if(role=='p')sendIn()},120);
+$('#bh').onclick=hostGame;$('#bj').onclick=joinGame;
+if(location.hash.length>2)$('#rid').value=location.hash.slice(1);
+
+/* ---------- Pantallas HTML ---------- */
+function uiSync(){const u=$('#ui');if(!S)return;
+ if(S.ph=='ready'||S.ph=='play'){u.classList.add('h');lastKey='';return}
+ const key=S.ph+S.p.map(p=>p[1]).join()+S.un+S.lv+S.win;
+ if(key==lastKey&&!u.classList.contains('h'))return;lastKey=key;u.classList.remove('h');
+ const host=role=='h',pl=S.p.map(p=>`<span style="color:${PC[p[7]]}">● ${p[1]}</span>`).join('');
+ if(S.ph=='lobby'){
+  let lv='';for(let n=1;n<=20;n++)lv+=`<button data-l="${n}" ${n>S.un?'disabled':''}>${n==20?'👹':n}</button>`;
+  u.innerHTML=`<div class="box"><h1>Cocina Caótica</h1><p>Sala <b>${S.rid}</b> <button class="s" id="cp">Copiar ID</button></p><p id="pl">${pl}</p>`+
+   (host?`<p>Elige nivel</p><div id="lv">${lv}</div><p class="hint">Los niveles se desbloquean al superarlos. El 👹 es el jefe final.</p>`:'<p>Esperando a que el anfitrión elija nivel…</p>')+'</div>';
+  $('#cp').onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(S.rid);toast('ID copiado')};
+  document.querySelectorAll('#lv button').forEach(b=>b.onclick=()=>startLevel(+b.dataset.l))}
+ else{const boss=S.lv==20,st='★'.repeat(S.stars)+'☆'.repeat(3-S.stars);
+  u.innerHTML=`<div class="box"><h1>${S.win?(boss?'¡Jefe derrotado!':'¡Nivel superado!'):'Se acabó el tiempo'}</h1>
+   <p style="font-size:2rem;color:#f2b134">${st}</p><p>${S.sc} puntos${boss?'':' (objetivo '+S.tg+')'}</p>
+   ${host?`<button id="nx" ${S.win&&S.lv<20?'':'style="display:none"'}>Siguiente nivel</button><button id="rp" class="s">Repetir</button><button id="lb" class="s">Elegir nivel</button>`:'<p>Esperando al anfitrión…</p>'}</div>`;
+  if(host){$('#nx').onclick=()=>startLevel(S.lv+1);$('#rp').onclick=()=>startLevel(S.lv);
+   $('#lb').onclick=()=>{G.ph='lobby';G.ev=[]}}}}
+
+/* ---------- Dibujo ---------- */
+function ico(q,x,y,z,whole){const k=q[0],s=+q[1];ctx.font=z+'px serif';
+ if(k=='M'&&s==3)return ctx.fillText('⬛',x,y);
+ if(k=='M'&&s==2)return ctx.fillText('🍖',x,y);
+ if(s==1&&!whole){ctx.font=z*.6+'px serif';[-.3,0,.3].forEach((d,n)=>ctx.fillText(ICO[k],x+d*z,y+(n%2?.18:-.12)*z))}
+ else ctx.fillText(ICO[k],x,y)}
+function item(it,x,y,z){if(!it)return;
+ if(typeof it=='object'){ctx.fillStyle='#fff';ctx.strokeStyle='#8fa3b5';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,z*.52,0,7);ctx.fill();ctx.stroke();
+  const n=it.p.length;it.p.forEach((q,k)=>{const a=k/n*6.28-1.57,r=n>1?z*.2:0;ico(q,x+Math.cos(a)*r,y+Math.sin(a)*r,z*(n>2?.34:.42),1)})}
+ else ico(it,x,y,z)}
+function bar(x,y,f,col){ctx.fillStyle='#0006';ctx.fillRect(x+6,y+TS-12,TS-12,6);ctx.fillStyle=col;ctx.fillRect(x+6,y+TS-12,(TS-12)*Math.min(1,f),6)}
+function render(){ctx.fillStyle='#1d2433';ctx.fillRect(0,0,cv.width,cv.height);if(!S)return;
+ const nR=performance.now(),dtR=Math.min((nR-lastR)/1000,.1);lastR=nR;
+ ctx.textAlign='center';ctx.textBaseline='middle';
+ const D=new Map(S.s.map(a=>[a[0],a])),now=performance.now()/1000;
+ for(let j=0;j<H;j++)for(let i=0;i<W;i++){const c=MP[j][i],x=i*TS,y=TOP+j*TS,idx=j*W+i;
+  if('.1234Z'.includes(c)){ctx.fillStyle=(i+j)%2?'#cfe0e8':'#bcd2dc';ctx.fillRect(x,y,TS,TS);continue}
+  if(c=='#'){ctx.fillStyle='#2c3a4f';ctx.fillRect(x,y,TS,TS);continue}
+  ctx.fillStyle='#8a5a35';ctx.fillRect(x,y,TS,TS);ctx.fillStyle=BASE[c]||'#c98f5a';ctx.fillRect(x+3,y+3,TS-6,TS-8);
+  const d=D.get(idx);
+  if(DEC[c]){ctx.globalAlpha='KG'.includes(c)&&d&&d[1]?.3:1;ctx.font=(TS*.55)+'px serif';ctx.fillText(DEC[c],x+TS/2,y+TS/2-2);ctx.globalAlpha=1}
+  if(d){item(d[1],x+TS/2,y+TS/2-2,TS*.62);
+   if(c=='K'&&d[2]>0)bar(x,y,d[2],'#4cc26a');
+   if(c=='G'&&d[1]&&!d[3])bar(x,y,d[4]<1?d[4]:d[4]-1,d[4]<1?'#4cc26a':'#e5483a');
+   if(d[3]){ctx.fillStyle='#000a';ctx.fillRect(x+3,y+3,TS-6,TS-8);ctx.font=(TS*(.8+Math.sin(now*9+idx)*.08))+'px serif';ctx.fillText('🔥',x+TS/2,y+TS/2);if(d[2]>0)bar(x,y,d[2],'#3aa0e5')}}}
+ if(S.lv==20){ctx.font=(TS*2.2)+'px serif';ctx.fillText('👹',5.5*TS,TOP+3.5*TS+Math.sin(now*3)*4)}
+ const me=S.p.find(p=>p[0]==myId);
+ if(me&&S.ph=='play'){ctx.strokeStyle='#f2b134';ctx.lineWidth=3;ctx.setLineDash([6,4]);
+  ctx.strokeRect(Math.floor(me[2]+me[4]*.75)*TS+2,TOP+Math.floor(me[3]+me[5]*.75)*TS+2,TS-4,TS-4);ctx.setLineDash([])}
+ for(const p of S.p){const v=V[p[0]]||(V[p[0]]={x:p[2],y:p[3]});
+  if(role=='h'){v.x=p[2];v.y=p[3]}else if(Math.hypot(p[2]-v.x,p[3]-v.y)>2){v.x=p[2];v.y=p[3]}else{const k=1-Math.exp(-dtR*16);v.x+=(p[2]-v.x)*k;v.y+=(p[3]-v.y)*k}
+  const x=v.x*TS,y=TOP+v.y*TS,fx=p[4],fy=p[5];
+  ctx.fillStyle='#0003';ctx.beginPath();ctx.ellipse(x,y+TS*.28,TS*.3,TS*.12,0,0,7);ctx.fill();
+  ctx.fillStyle=PC[p[7]];ctx.beginPath();ctx.arc(x,y,TS*.32,0,7);ctx.fill();
+  ctx.fillStyle='#fff';ctx.fillRect(x-TS*.2,y-TS*.52,TS*.4,TS*.2);ctx.beginPath();ctx.arc(x,y-TS*.52,TS*.2,3.14,6.28);ctx.fill();
+  [-1,1].forEach(s=>{const ex=x+(fy?s*TS*.1:fx*TS*.1+0),ey=y+(fy?fy*TS*.08:s*TS*.1);ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(fy?ex:x+fx*TS*.12,fy?ey:ey,TS*.07,0,7);ctx.fill()});
+  ctx.fillStyle='#fff';ctx.font='700 11px sans-serif';ctx.fillText(p[1],x,y+TS*.45);
+  if(p[6])item(p[6],x+fx*TS*.55,y+fy*TS*.55-4,TS*.5)}
+ /* HUD */
+ ctx.fillStyle='#1d2433';ctx.fillRect(0,0,cv.width,TOP);ctx.textAlign='left';
+ ctx.font="700 20px 'Baloo 2',sans-serif";ctx.fillStyle='#f2b134';ctx.fillText(S.lv==20?'Jefe final':'Nivel '+S.lv,10,20);
+ const t=Math.ceil(S.t);ctx.fillStyle=t<15&&S.ph=='play'?'#ff6b5a':'#fff';ctx.fillText(Math.floor(t/60)+':'+String(t%60).padStart(2,'0'),10,44);
+ ctx.fillStyle='#fff';ctx.font="500 15px 'Baloo 2',sans-serif";ctx.fillText(S.lv==20?S.sc+' pts':S.sc+' / '+S.tg+' pts',10,66);
+ S.o.forEach((o,k)=>{const x=196+k*102,r=RECS[o[0]];ctx.fillStyle='#fff';ctx.fillRect(x,6,98,60);
+  ctx.fillStyle='#1d2433';ctx.textAlign='center';ctx.font="700 12px 'Baloo 2',sans-serif";ctx.fillText(r[0],x+49,17);
+  r[1].forEach((q,n)=>{ctx.font='15px serif';ctx.fillText(q[1]=='2'?'🍖':ICO[q[0]],x+49+(n-(r[1].length-1)/2)*18,38)});
+  ctx.fillStyle=o[1]>.5?'#4cc26a':o[1]>.25?'#f2b134':'#e5483a';ctx.fillRect(x,60,98*o[1],6)});
+ if(S.lv==20&&S.ph!='lobby'){ctx.fillStyle='#0006';ctx.fillRect(10,TOP-14,cv.width-20,8);ctx.fillStyle='#e5483a';ctx.fillRect(10,TOP-14,(cv.width-20)*S.hp/100,8)}
+ if(S.ph=='ready'){ctx.textAlign='center';ctx.font="700 120px 'Baloo 2',sans-serif";ctx.fillStyle='#f2b134';ctx.strokeStyle='#1d2433';ctx.lineWidth=8;
+  ctx.strokeText(Math.ceil(S.cd),cv.width/2,cv.height/2+30);ctx.fillText(Math.ceil(S.cd),cv.width/2,cv.height/2+30)}}
+(function loop(){hostStep();render();uiSync();requestAnimationFrame(loop)})();
+</script></body></html>

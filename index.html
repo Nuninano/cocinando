@@ -11,6 +11,8 @@ body{background:#141a26;color:#fff;font:500 16px 'Baloo 2',system-ui,sans-serif;
 canvas{width:100%;display:block;background:#2c3a4f;border-radius:10px}
 #ui{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(20,26,38,.9);border-radius:10px;overflow:auto}
 #ui.h{display:none}
+#ui.w{background:none;align-items:flex-end;pointer-events:none}
+#ui.w .box{pointer-events:auto;background:#141a26e6;border-radius:12px;margin-bottom:8px}
 .box{max-width:560px;width:94%;text-align:center;padding:10px}
 h1{font-size:2.3rem;color:#f2b134;line-height:1}
 p{margin:.45rem 0}
@@ -132,7 +134,7 @@ function tick(dt){const g=G;if(!g)return;
  if(g.t<=0){g.t=0;endLv(!c.b&&g.sc>=c.tg)}}
 function snap(){const g=G,s=[];
  for(const k in g.st){const o=g.st[k];if(o.item||o.fire||o.prog||o.cook)s.push([+k,o.item,o.prog,o.fire,o.cook])}
- return{ph:g.ph,lv:g.lv,sc:g.sc,tg:g.c.tg,t:g.t,cd:g.cd,hp:g.hp,un,win:g.win,stars:g.stars,rid:roomId,
+ return{ph:g.ph,lv:g.lv,sc:g.sc,tg:g.c.tg,tm:g.t,cd:g.cd,hp:g.hp,un,win:g.win,stars:g.stars,rid:roomId,
   o:g.orders.map(o=>[o.r,o.t/o.m]),p:Object.values(P).map(p=>[p.id,p.n,p.x,p.y,p.fx,p.fy,p.h,p.i,p.rd?1:0,p.wait?1:0]),s,ev:g.ev}}
 let lastT=performance.now(),acc=0,lastR=performance.now();
 function hostStep(){if(role!='h'||!G)return;const n=performance.now(),dt=Math.min((n-lastT)/1000,.25);lastT=n;
@@ -150,7 +152,7 @@ function hostGame(){myName=esc($('#nm').value||'Chef');role='h';myId='h';
   c.on('data',d=>{if(typeof d=='string')d=JSON.parse(d);
    if(d.t=='join'){if(conns[c.peer]&&addP(c.peer,esc(d.n||'Chef')))ev(esc(d.n||'Chef')+(G.ph=='lobby'?' se unió a la sala':' espera al siguiente nivel'))}
    const p=P[c.peer];if(!p)return;
-   if(d.t=='rd'&&G.ph=='lobby')p.rd=!p.rd;
+   if(d.t=='rd')p.rd=!p.rd;
    if(d.t=='in'){p.dx=d.dx|0;p.dy=d.dy|0;p.w=!!d.w}
    if(d.t=='act'&&G.ph=='play')act(p)});
   c.on('close',()=>{const p=P[c.peer];if(p)ev(p.n+' se fue');delete P[c.peer];delete conns[c.peer]})});
@@ -183,14 +185,16 @@ if(location.hash.length>2)$('#rid').value=location.hash.slice(1);
 
 /* ---------- Pantallas HTML ---------- */
 function uiSync(){const u=$('#ui');if(!S)return;
- if(S.ph=='ready'||S.ph=='play'){u.classList.add('h');lastKey='';return}
- const key=S.ph+S.p.map(p=>p[1]+p[8]+p[9]).join()+S.un+S.lv+S.win;
+ const mw=S.p.find(p=>p[0]==myId),waiting=!!(mw&&mw[9])&&(S.ph=='ready'||S.ph=='play');
+ u.classList.toggle('w',waiting);
+ if((S.ph=='ready'||S.ph=='play')&&!waiting){u.classList.add('h');lastKey='';return}
+ const key=S.ph+waiting+S.p.map(p=>p[1]+p[8]+p[9]).join()+S.un+S.lv+S.win;
  if(key==lastKey&&!u.classList.contains('h'))return;lastKey=key;u.classList.remove('h');
  const host=role=='h',me=S.p.find(p=>p[0]==myId),nr=S.p.filter(p=>p[8]).length,pl=S.p.map(p=>`<span style="color:${PC[p[7]]}">${p[8]?'✔':'●'} ${p[1]}${p[0]=='h'?' (anfitrión)':''}${p[9]?' · en espera':''}</span>`).join('<br>');
- if(S.ph=='lobby'){
+ if(S.ph=='lobby'||waiting){
   let lv='';for(let n=1;n<=20;n++)lv+=`<button data-l="${n}" ${n>S.un?'disabled':''}>${n==20?'👹':n}</button>`;
   u.innerHTML=`<div class="box"><h1>Cocina Caótica</h1><p>Sala <b>${S.rid}</b></p><p><button class="s" id="cp">Copiar ID</button><button class="s" id="cl">Copiar enlace</button></p><p class="hint">Sala de espera · ${S.p.length}/4 jugadores · ${nr} listos</p><p id="pl">${pl}</p><button id="rdy">${me&&me[8]?'Ya no estoy listo':'¡Estoy listo!'}</button>`+
-   (host?`<p>Elige un nivel para empezar</p><div id="lv">${lv}</div><p class="hint">Los niveles se desbloquean al superarlos. El 👹 es el jefe final.</p>`:'<p>Esperando a que el anfitrión elija nivel…</p>')+'</div>';
+   (waiting?'<p>Hay un nivel en curso. Entrarás cuando empiece el siguiente.</p>':host?`<p>Elige un nivel para empezar</p><div id="lv">${lv}</div><p class="hint">Los niveles se desbloquean al superarlos. El 👹 es el jefe final.</p>`:'<p>Esperando a que el anfitrión elija nivel…</p>')+'</div>';
   $('#cp').onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(S.rid);toast('ID copiado')};
   $('#cl').onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href.split('#')[0]+'#'+S.rid);toast('Enlace copiado')};
   $('#rdy').onclick=()=>{if(host){P.h.rd=!P.h.rd}else conn.send({t:'rd'})};
@@ -243,14 +247,13 @@ function render(){ctx.fillStyle='#1d2433';ctx.fillRect(0,0,cv.width,cv.height);i
  /* HUD */
  ctx.fillStyle='#1d2433';ctx.fillRect(0,0,cv.width,TOP);ctx.textAlign='left';
  ctx.font="700 20px 'Baloo 2',sans-serif";ctx.fillStyle='#f2b134';ctx.fillText(S.lv==20?'Jefe final':'Nivel '+S.lv,10,20);
- const t=Math.ceil(S.t);ctx.fillStyle=t<15&&S.ph=='play'?'#ff6b5a':'#fff';ctx.fillText(Math.floor(t/60)+':'+String(t%60).padStart(2,'0'),10,44);
+ const t=Math.ceil(S.tm);ctx.fillStyle=t<15&&S.ph=='play'?'#ff6b5a':'#fff';ctx.fillText(Math.floor(t/60)+':'+String(t%60).padStart(2,'0'),10,44);
  ctx.fillStyle='#fff';ctx.font="500 15px 'Baloo 2',sans-serif";ctx.fillText(S.lv==20?S.sc+' pts':S.sc+' / '+S.tg+' pts',10,66);
  S.o.forEach((o,k)=>{const x=196+k*102,r=RECS[o[0]];ctx.fillStyle='#fff';ctx.fillRect(x,6,98,60);
   ctx.fillStyle='#1d2433';ctx.textAlign='center';ctx.font="700 12px 'Baloo 2',sans-serif";ctx.fillText(r[0],x+49,17);
   r[1].forEach((q,n)=>{ctx.font='15px serif';ctx.fillText(q[1]=='2'?'🍖':ICO[q[0]],x+49+(n-(r[1].length-1)/2)*18,38)});
   ctx.fillStyle=o[1]>.5?'#4cc26a':o[1]>.25?'#f2b134':'#e5483a';ctx.fillRect(x,60,98*o[1],6)});
  if(S.lv==20&&S.ph!='lobby'){ctx.fillStyle='#0006';ctx.fillRect(10,TOP-14,cv.width-20,8);ctx.fillStyle='#e5483a';ctx.fillRect(10,TOP-14,(cv.width-20)*S.hp/100,8)}
- if(me&&me[9]&&S.ph!='lobby'){ctx.fillStyle='#141a26cc';ctx.fillRect(0,TOP,cv.width,cv.height-TOP);ctx.fillStyle='#f2b134';ctx.textAlign='center';ctx.font="700 28px 'Baloo 2',sans-serif";ctx.fillText('Sala de espera',cv.width/2,cv.height/2);ctx.fillStyle='#fff';ctx.font="500 18px 'Baloo 2',sans-serif";ctx.fillText('Entrarás cuando empiece el siguiente nivel',cv.width/2,cv.height/2+34)}
  if(S.ph=='ready'){ctx.textAlign='center';ctx.font="700 120px 'Baloo 2',sans-serif";ctx.fillStyle='#f2b134';ctx.strokeStyle='#1d2433';ctx.lineWidth=8;
   ctx.strokeText(Math.ceil(S.cd),cv.width/2,cv.height/2+30);ctx.fillText(Math.ceil(S.cd),cv.width/2,cv.height/2+30)}}
 (function loop(){hostStep();render();uiSync();requestAnimationFrame(loop)})();
